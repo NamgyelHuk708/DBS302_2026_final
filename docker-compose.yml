@@ -1,0 +1,100 @@
+networks:
+  xyznet:
+    driver: bridge
+
+services:
+
+  # ─── MongoDB Replica Set ───────────────────────────────────────────────────
+
+  mongo1:
+    image: mongo:7.0
+    container_name: mongo1
+    hostname: mongo1
+    networks: [xyznet]
+    ports: ["27017:27017"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+    volumes:
+      - mongo1_data:/data/db
+      - ./docker/mongo/init-replica.js:/docker-entrypoint-initdb.d/init-replica.js:ro
+      - ./docker/mongo/keyfile:/etc/mongo-keyfile-src:ro
+    entrypoint: ["/bin/bash", "-c", "cp /etc/mongo-keyfile-src /etc/mongo-keyfile && chmod 400 /etc/mongo-keyfile && chown mongodb:mongodb /etc/mongo-keyfile && exec docker-entrypoint.sh $$@", "--"]
+    command: mongod --replSet rs0 --bind_ip_all --auth --keyFile /etc/mongo-keyfile
+
+  mongo2:
+    image: mongo:7.0
+    container_name: mongo2
+    hostname: mongo2
+    networks: [xyznet]
+    ports: ["27018:27017"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+    volumes:
+      - mongo2_data:/data/db
+      - ./docker/mongo/keyfile:/etc/mongo-keyfile-src:ro
+    entrypoint: ["/bin/bash", "-c", "cp /etc/mongo-keyfile-src /etc/mongo-keyfile && chmod 400 /etc/mongo-keyfile && chown mongodb:mongodb /etc/mongo-keyfile && exec docker-entrypoint.sh $$@", "--"]
+    command: mongod --replSet rs0 --bind_ip_all --auth --keyFile /etc/mongo-keyfile
+
+  mongo3:
+    image: mongo:7.0
+    container_name: mongo3
+    hostname: mongo3
+    networks: [xyznet]
+    ports: ["27019:27017"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+    volumes:
+      - mongo3_data:/data/db
+      - ./docker/mongo/keyfile:/etc/mongo-keyfile-src:ro
+    entrypoint: ["/bin/bash", "-c", "cp /etc/mongo-keyfile-src /etc/mongo-keyfile && chmod 400 /etc/mongo-keyfile && chown mongodb:mongodb /etc/mongo-keyfile && exec docker-entrypoint.sh $$@", "--"]
+    command: mongod --replSet rs0 --bind_ip_all --auth --keyFile /etc/mongo-keyfile
+
+  # ─── Redis Master + Replicas + Sentinel ───────────────────────────────────
+
+  redis-master:
+    image: redis:7.2
+    container_name: redis-master
+    networks: [xyznet]
+    ports: ["6380:6379"]
+    command: redis-server --requirepass redispassword --appendonly yes --appendfsync everysec --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_master_data:/data
+
+  redis-replica1:
+    image: redis:7.2
+    container_name: redis-replica1
+    networks: [xyznet]
+    command: redis-server --requirepass redispassword --replicaof redis-master 6379 --masterauth redispassword --appendonly yes
+    volumes:
+      - redis_replica1_data:/data
+    depends_on: [redis-master]
+
+  redis-replica2:
+    image: redis:7.2
+    container_name: redis-replica2
+    networks: [xyznet]
+    command: redis-server --requirepass redispassword --replicaof redis-master 6379 --masterauth redispassword --appendonly yes
+    volumes:
+      - redis_replica2_data:/data
+    depends_on: [redis-master]
+
+  redis-sentinel1:
+    image: redis:7.2
+    container_name: redis-sentinel1
+    networks: [xyznet]
+    restart: on-failure
+    entrypoint: ["sh", "-c", "sleep 3 && IP=$$(getent hosts redis-master | cut -d' ' -f1) && sed \"s/redis-master/$$IP/g\" /etc/redis/sentinel.conf > /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"]
+    volumes:
+      - ./docker/redis/sentinel.conf:/etc/redis/sentinel.conf
+    depends_on: [redis-master, redis-replica1, redis-replica2]
+
+volumes:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
+  redis_master_data:
+  redis_replica1_data:
+  redis_replica2_data:
